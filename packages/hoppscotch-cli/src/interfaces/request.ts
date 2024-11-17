@@ -1,4 +1,5 @@
-import { AxiosPromise, AxiosRequestConfig } from "axios";
+type Method = "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE" | "PATCH";
+import type { Response } from "node-fetch";
 import { HoppRESTRequest } from "@hoppscotch/data";
 
 /**
@@ -11,7 +12,7 @@ import { HoppRESTRequest } from "@hoppscotch/data";
  * running testRunner.
  */
 export interface RequestStack {
-  request: () => AxiosPromise<any>;
+  request: () => Promise<Response>;
   path: string;
 }
 
@@ -19,7 +20,12 @@ export interface RequestStack {
  * Provides definition to axios request promise's request parameter.
  * @property {boolean} supported - Boolean check for supported or unsupported requests.
  */
-export interface RequestConfig extends AxiosRequestConfig {
+export interface RequestConfig {
+  url?: string;
+  method?: Method;
+  headers?: Record<string, string>;
+  params?: Record<string, string>;
+  data?: any;
   displayUrl?: string;
 }
 

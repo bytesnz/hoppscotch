@@ -4,7 +4,8 @@ import {
   HoppRESTRequest,
   RESTReqSchemaVersion,
 } from "@hoppscotch/data";
-import axios, { Method } from "axios";
+type Method = "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE" | "PATCH";
+import { fetch, Request, Response } from "node-fetch";
 import * as A from "fp-ts/Array";
 import * as E from "fp-ts/Either";
 import * as T from "fp-ts/Task";
@@ -106,59 +107,68 @@ export const requestRunner =
     const start = hrtime();
 
     try {
-      // NOTE: Temporary parsing check for request endpoint.
-      requestConfig.url = new URL(requestConfig.url ?? "").toString();
+      // Ensure URL is valid
+      if (requestConfig.url) {
+        requestConfig.url = new URL(requestConfig.url).toString();
+      }
 
-      let status: number;
-      const baseResponse = await axios(requestConfig);
-      const { config } = baseResponse;
-      // PR-COMMENT: type error
+      // Create fetch request from config
+      const fetchRequest = createFetchRequest(requestConfig);
+      
+      // Execute request
+      const response = await fetch(fetchRequest);
+      
+      // Calculate duration
+      const end = hrtime(start);
+      const duration = getDurationInSeconds(end);
+
+      if (!response.ok) {
+        // Handle HTTP error responses similar to axios
+        const responseObj = await createResponseObject(response, duration);
+        const runnerResponse: RequestRunnerResponse = {
+          endpoint: requestConfig.url ?? "",
+          method: requestConfig.method ?? "GET",
+          body: responseObj.data,
+          statusText: response.statusText,
+          status: response.status,
+          headers: Object.fromEntries(response.headers),
+          duration
+        };
+        return E.right(runnerResponse);
+      }
+      
+      // Create response object in the expected format
+      const responseObj = await createResponseObject(response, duration);
+      
       const runnerResponse: RequestRunnerResponse = {
-        ...baseResponse,
-        endpoint: getRequest.endpoint(config.url),
-        method: getRequest.method(config.method),
-        body: baseResponse.data,
+        ...responseObj,
+        endpoint: getRequest.endpoint(requestConfig.url),
+        method: getRequest.method(requestConfig.method),
+        body: responseObj.data,
+      };
+
+      return E.right(runnerResponse);
+    } catch (e) {
+      const runnerResponse: RequestRunnerResponse = {
+        endpoint: requestConfig.url ?? "",
+        method: requestConfig.method ?? "GET",
+        body: {},
+        statusText: responseErrors[400],
+        status: 400,
+        headers: {},
         duration: 0,
       };
+
+      if (e instanceof TypeError) {
+        // Network or parsing error
+        return E.left(error({ code: "REQUEST_ERROR", data: E.toError(e) }));
+      }
 
       const end = hrtime(start);
       const duration = getDurationInSeconds(end);
       runnerResponse.duration = duration;
 
       return E.right(runnerResponse);
-    } catch (e) {
-      let status: number;
-      const runnerResponse: RequestRunnerResponse = {
-        endpoint: "",
-        method: "GET",
-        body: {},
-        statusText: responseErrors[400],
-        status: 400,
-        headers: [],
-        duration: 0,
-      };
-
-      if (axios.isAxiosError(e)) {
-        runnerResponse.endpoint = e.config?.url ?? "";
-
-        if (e.response) {
-          const { data, status, statusText, headers } = e.response;
-          runnerResponse.body = data;
-          runnerResponse.statusText = statusText;
-          runnerResponse.status = status;
-          runnerResponse.headers = headers;
-        } else if (e.request) {
-          return E.left(error({ code: "REQUEST_ERROR", data: E.toError(e) }));
-        }
-
-        const end = hrtime(start);
-        const duration = getDurationInSeconds(end);
-        runnerResponse.duration = duration;
-
-        return E.right(runnerResponse);
-      }
-
-      return E.left(error({ code: "REQUEST_ERROR", data: E.toError(e) }));
     }
   };
 
